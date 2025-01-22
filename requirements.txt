@@ -1,2 +1,6 @@
 yt-dlp==2023.12.30
 flask==3.0.0
+tqdm
+requests
+beautifulsoup4
+aiohttp
