@@ -53,7 +53,6 @@ class TwitterCrawler:
                         continue
 
                     content = tweet.get_text(strip=True)
-                    content = content[:15] + "..." if len(content) > 15 else content
                     
                     tweet_data = {
                         '作者': username,
@@ -62,7 +61,7 @@ class TwitterCrawler:
                         '来源': instance
                     }
                     
-                    print(f"✓ {username}: {content}")
+                    print(f"✓ {username}: {content[:50]}...")  # 只在打印时显示前50个字符，但保存完整内容
                     return tweet_data
                     
             except asyncio.TimeoutError:
@@ -180,7 +179,12 @@ class TwitterCrawler:
 async def main():
     # Twitter用户列表
     users = [
-        "elonmusk", "sama", "naval", "balajis", "pmarca"
+        "levelsio",      # Pieter Levels
+        "AxtonLiu",      # Axton Liu
+        "dotey",         # Dotey
+        "mckaywrigley",  # McKay Wrigley
+        "aigclink",      # AIGC Link
+        "op7418"         # OP7418
     ]
     
     start_time = time.time()
