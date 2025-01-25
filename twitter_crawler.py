@@ -16,74 +16,94 @@ class TwitterCrawler:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        # nitter实例列表
+        # nitter实例列表 - 按可靠性排序
         self.instances = [
-            'https://nitter.net',
-            'https://nitter.cz',
+            'https://nitter.bird.froth.zone',
+            'https://nitter.privacydev.net',
+            'https://nitter.woodland.cafe',
+            'https://nitter.ktachibana.party',
+            'https://nitter.freedit.eu',
+            'https://nitter.poast.org',
+            'https://nitter.mint.lgbt',
+            'https://nitter.fdn.fr',
             'https://nitter.1d4.us',
             'https://nitter.kavin.rocks',
             'https://nitter.unixfox.eu',
-            'https://nitter.fdn.fr',
-            'https://nitter.mint.lgbt',
             'https://nitter.moomoo.me',
-            'https://nitter.privacydev.net',
-            'https://nitter.poast.org'
+            'https://nitter.net',
+            'https://nitter.cz',
         ]
 
-    async def get_user_tweet(self, session, username):
+    async def get_user_tweet(self, session, username, max_retries=3):
         # 随机打乱实例列表
         instances = self.instances.copy()
         random.shuffle(instances)
         
-        # 尝试每个实例
+        # 为每个实例尝试多次
         for instance in instances:
-            try:
-                url = f'{instance}/{username}'
-                async with session.get(url, headers=self.headers, ssl=False, timeout=3) as response:
-                    if response.status != 200:
-                        print(f"✗ {username}: HTTP {response.status} from {instance}")
-                        continue
+            for retry in range(max_retries):
+                try:
+                    url = f'{instance}/{username}'
+                    async with session.get(url, headers=self.headers, ssl=False, timeout=5) as response:
+                        if response.status != 200:
+                            print(f"✗ {username}: HTTP {response.status} from {instance} (retry {retry + 1}/{max_retries})")
+                            await asyncio.sleep(1)  # 等待1秒后重试
+                            continue
 
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    tweet = soup.find('div', class_='tweet-content')
-                    
-                    if not tweet:
-                        print(f"✗ {username}: No tweets found on {instance}")
-                        continue
+                        html = await response.text()
+                        soup = BeautifulSoup(html, 'html.parser')
+                        
+                        # 获取第一条推文
+                        tweet_container = soup.find('div', class_='timeline-item')
+                        if not tweet_container:
+                            print(f"✗ {username}: No tweets found on {instance}")
+                            continue
 
-                    content = tweet.get_text(strip=True)
+                        # 获取推文内容
+                        tweet = tweet_container.find('div', class_='tweet-content')
+                        if not tweet:
+                            continue
+
+                        # 获取推文链接
+                        link_elem = tweet_container.find('a', class_='tweet-link')
+                        tweet_id = link_elem['href'].split('/')[-1] if link_elem else None
+                        
+                        content = tweet.get_text(strip=True)
+                        
+                        tweet_data = {
+                            '作者': username,
+                            '内容': content,
+                            '抓取时间': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            '来源': instance,
+                            '链接': f'https://twitter.com/{username}/status/{tweet_id}' if tweet_id else None
+                        }
+                        
+                        print(f"✓ {username}: {content[:50]}...")
+                        return tweet_data
                     
-                    tweet_data = {
-                        '作者': username,
-                        '内容': content,
-                        '抓取时间': time.strftime('%Y-%m-%d %H:%M:%S'),
-                        '来源': instance
-                    }
-                    
-                    print(f"✓ {username}: {content[:50]}...")  # 只在打印时显示前50个字符，但保存完整内容
-                    return tweet_data
-                    
-            except asyncio.TimeoutError:
-                print(f"✗ {username}: Timeout on {instance}")
-                continue
-            except Exception as e:
-                print(f"✗ {username}: Error on {instance} - {str(e)}")
-                continue
+                except asyncio.TimeoutError:
+                    print(f"✗ {username}: Timeout on {instance} (retry {retry + 1}/{max_retries})")
+                    await asyncio.sleep(1)
+                    continue
+                except Exception as e:
+                    print(f"✗ {username}: Error on {instance} - {str(e)} (retry {retry + 1}/{max_retries})")
+                    await asyncio.sleep(1)
+                    continue
         
-        print(f"✗ {username}: Failed on all instances")
+        print(f"✗ {username}: Failed on all instances after {max_retries} retries")
         return None
 
     async def get_all_tweets(self, users):
         # 设置更宽松的连接限制
-        conn = aiohttp.TCPConnector(limit=10, force_close=True, enable_cleanup_closed=True)
-        timeout = aiohttp.ClientTimeout(total=30, connect=3, sock_connect=3, sock_read=3)
+        conn = aiohttp.TCPConnector(limit=5, force_close=True, enable_cleanup_closed=True)
+        timeout = aiohttp.ClientTimeout(total=60, connect=5, sock_connect=5, sock_read=5)
         
         async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
             tasks = []
             for username in users:
                 task = asyncio.create_task(self.get_user_tweet(session, username))
                 tasks.append(task)
+                await asyncio.sleep(0.5)  # 添加延迟，避免同时发起太多请求
             
             results = await asyncio.gather(*tasks)
             return [r for r in results if r is not None]
@@ -140,6 +160,15 @@ class TwitterCrawler:
             color: #666;
             display: flex;
             justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .tweet-link {
+            color: #1da1f2;
+            text-decoration: none;
+        }
+        .tweet-link:hover {
+            text-decoration: underline;
         }
         .update-time {
             text-align: center;
@@ -163,6 +192,7 @@ class TwitterCrawler:
             <div class="tweet-meta">
                 <span>@{tweet['作者']}</span>
                 <span>{tweet['抓取时间']}</span>
+                {'<a href="' + tweet['链接'] + '" target="_blank" class="tweet-link">查看原文</a>' if tweet['链接'] else ''}
             </div>
         </div>'''
 
